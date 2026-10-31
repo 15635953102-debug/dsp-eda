@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsp-eda · 戴森球产线工作台</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◈</span>
+    <span>戴森球生产线工作台</span>
+    <span class="ver" id="appVer">v0.1</span>
+  </div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="design">布局设计</button>
+    <button class="tab" data-tab="calc">配平计算器</button>
+  </nav>
+  <div class="actions">
+    <button id="btnNew" class="btn ghost">新建</button>
+    <button id="btnImport" class="btn">导入蓝图</button>
+    <button id="btnExport" class="btn primary">导出蓝图</button>
+    <button id="btnSaveProj" class="btn ghost">保存工程</button>
+    <button id="btnOpenProj" class="btn ghost">打开工程</button>
+    <input type="file" id="fileProj" accept=".json" hidden>
+    <input type="file" id="fileBp" accept=".txt,.json" hidden>
+  </div>
+</header>
+
+<main id="viewDesign" class="view">
+  <aside class="panel palette">
+    <div class="panel-head">
+      <span>建筑</span>
+      <input id="paletteSearch" class="search" placeholder="搜索建筑…">
+    </div>
+    <div id="paletteList" class="palette-list"></div>
+    <div class="palette-hint">
+      <div><b>操作</b></div>
+      <div>· 选择建筑后在画布点击放置</div>
+      <div>· <b>R</b> 旋转，<b>Esc</b> 取消，<b>Del</b> 删除</div>
+      <div>· 传送带：按住左键拖，<b>拖动方向</b>＝朝向</div>
+      <div>· 中键/右键拖动平移，滚轮缩放</div>
+      <div>· 拖框多选，<b>Ctrl+C/V</b> 复制粘贴</div>
+    </div>
+  </aside>
+
+  <section class="canvas-wrap">
+    <canvas id="cv"></canvas>
+    <div class="hud">
+      <span id="hudInfo">空布局</span>
+      <span id="hudPower" class="warnchip" style="display:none"></span>
+      <span class="sep">|</span>
+      <span id="layerBar" class="layerbar"></span>
+      <button id="btnShowPower" class="mini">电力范围</button>
+      <button id="btnShowWeapon" class="mini">武器射程</button>
+      <button id="btnShowPorts" class="mini">输入输出口</button>
+      <span id="hudZoom">100%</span>
+      <button id="btnFit" class="mini">适应</button>
+      <button id="btnZoomIn" class="mini">＋</button>
+      <button id="btnZoomOut" class="mini">－</button>
+    </div>
+    <div id="dropHint" class="drop-hint">把 .txt 蓝图文件拖到这里</div>
+  </section>
+
+  <aside class="panel inspector">
+    <div class="panel-head"><span>属性 / 统计</span></div>
+    <div id="inspectorBody" class="scroll"></div>
+  </aside>
+</main>
+
+<main id="viewCalc" class="view hidden">
+  <section class="calc-form panel">
+    <div class="row">
+      <label>目标产物</label>
+      <input id="calcItem" list="itemList" value="铁块" placeholder="输入物品名，例如 铁块">
+      <datalist id="itemList"></datalist>
+    </div>
+    <div class="row">
+      <label>目标产量</label>
+      <input id="calcRate" type="number" value="60" min="0.1" step="1">
+      <span class="unit">/ 分钟</span>
+    </div>
+    <div class="row">
+      <label>机器偏好</label>
+      <select id="calcMachine"><option value="0">自动（最快可用）</option></select>
+    </div>
+    <div class="row">
+      <label>清单口径</label>
+      <label class="chk"><input type="radio" name="calcMode" value="fraction" checked> 精确</label>
+      <label class="chk"><input type="radio" name="calcMode" value="ceil"> 取整</label>
+    </div>
+    <div class="row btns">
+      <button id="btnCalc" class="btn primary">计算</button>
+      <button id="btnGenLayout" class="btn">生成布局</button>
+    </div>
+    <div class="note">机器速度按配方面板倍率估算；电力为满速参考值，用于规划。</div>
+  </section>
+  <section class="calc-result panel">
+    <div id="calcOut" class="scroll"></div>
+  </section>
+</main>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span id="modalTitle">标题</span>
+      <button id="modalClose" class="mini">✕</button>
+    </div>
+    <div id="modalBody" class="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="js/data.js"></script>
+<script src="js/md5.js"></script>
+<script src="js/blueprint.js"></script>
+<script src="js/calc.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

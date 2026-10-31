@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>browser-test</title></head>
+<body>
+<pre id="out">running…</pre>
+<script src="../js/data.js"></script>
+<script src="../js/md5.js"></script>
+<script src="../js/blueprint.js"></script>
+<script src="sample_bp.js"></script>
+<script>
+(async function () {
+  var lines = [];
+  function log(s) { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); }
+  try {
+    log('CompressionStream=' + (typeof CompressionStream) + ' DecompressionStream=' + (typeof DecompressionStream));
+    var p = DSPBP.parse(window.SAMPLE_BP);
+    await DSPBP.parsePayload(p);
+    log('hashOk=' + p.hashOk + ' version=' + p.meta.version + ' buildings=' + p.buildings.length + ' trailer=' + Array.from(p.trailer).join(','));
+    var recs = p.buildings.map(function (b) {
+      return {
+        item: b.item, model: b.model, p0: b.p0, yaw0: b.yaw0, yaw1: b.yaw1,
+        tilt: b.tilt, tilt2: b.tilt2, pitch: b.pitch, pitch2: b.pitch2, p1: b.p1,
+        outo: b.outo, ino: b.ino, s01: b.s01, s02: b.s02, s03: b.s03, s04: b.s04, s05: b.s05, s06: b.s06,
+        recipe: b.recipe, filter: b.filter, params: b.params, marker: b.marker, extra4: b.extra4
+      };
+    });
+    var out = await DSPBP.build(recs, {
+      version: p.meta.version, layout: p.header.layout, gameVersion: p.header.gameVersion,
+      shortDesc: p.header.shortDesc, desc: p.header.desc,
+      dragX: p.meta.dragX, dragY: p.meta.dragY, trailer: p.trailer
+    });
+    var p2 = DSPBP.parse(out);
+    await DSPBP.parsePayload(p2);
+    var same = p2.buildings.length === p.buildings.length;
+    for (var i = 0; same && i < recs.length; i++) {
+      if (p2.buildings[i].item !== recs[i].item || p2.buildings[i].recipe !== recs[i].recipe) same = false;
+    }
+    log('rebuilt hashOk=' + p2.hashOk + ' same=' + same + ' len=' + out.length);
+    log(same && p2.hashOk ? 'RESULT: PASS' : 'RESULT: FAIL');
+  } catch (e) {
+    log('RESULT: ERROR ' + e.message);
+  }
+})();
+</script>
+</body>
+</html>

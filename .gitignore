@@ -1,0 +1,21 @@
+# 依赖 / 构建产物
+node_modules/
+dist/
+
+# 参考数据与临时诊断（体积大、可重新下载）
+tools/ref/
+tools/probe/*.json
+tools/probe/*.mjs
+tools/probe/*.py
+tools/real_bp.js
+
+# 临时测试页与截图
+_t*.html
+tools/shot_*.png
+tools/final*.png
+tools/sel.png
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini
