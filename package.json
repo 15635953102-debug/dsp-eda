@@ -4,7 +4,14 @@
   "private": true,
   "description": "Dyson Sphere Program 的产线 EDA —— 像画板子一样画产线：布局、配平、蓝图三合一",
   "keywords": ["dyson-sphere-program", "dsp", "blueprint", "factory", "layout", "eda"],
-  "homepage": "",
+  "homepage": "https://github.com/15635953102-debug/dsp-eda",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/15635953102-debug/dsp-eda.git"
+  },
+  "bugs": {
+    "url": "https://github.com/15635953102-debug/dsp-eda/issues"
+  },
   "license": "MIT",
   "scripts": {
     "serve": "npx --yes serve .",

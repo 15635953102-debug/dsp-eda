@@ -2,8 +2,13 @@
 
 > Dyson Sphere Program 的产线 EDA —— 像画板子一样画产线：布局、配平、蓝图三合一。
 
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![no deps](https://img.shields.io/badge/deps-0-brightgreen.svg)](package.json)
+
 一个纯前端的《戴森球计划》产线设计与蓝图工具：网格布局编辑器 + 配平计算器 + 蓝图导入导出。
 不需要安装、不需要联网，双击 `index.html` 即可使用（Chrome / Edge 等 Chromium 内核浏览器）。
+
+仓库：<https://github.com/15635953102-debug/dsp-eda>
 
 ![布局编辑器](docs/screenshot-design.png)
 
