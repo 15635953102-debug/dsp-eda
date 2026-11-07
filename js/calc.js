@@ -477,6 +477,65 @@
     return res;
   }
 
+  // ---------- DRC：设计规则检查 ----------
+  function drc(buildings) {
+    var byUid = {};
+    buildings.forEach(function (b) { byUid[b.uid] = b; });
+    var isBelt = function (it) { return it >= 2001 && it <= 2003; };
+    var isSorter = function (it) { return it >= 2011 && it <= 2014; };
+    var out = { isolated: [], longSorter: [], unpowered: [], missing: [], noPort: [], counts: {} };
+
+    // 1) 断头带子：四周没有别的带子、也没有爪子接它的
+    var cell = {};
+    buildings.forEach(function (b) {
+      if (isBelt(b.item)) cell[Math.floor(b.x) + ',' + Math.floor(b.y)] = b.uid;
+    });
+    var touched = {};
+    buildings.forEach(function (b) {
+      if (!isSorter(b.item)) return;
+      var ex = b.extra || {};
+      [ex.fromUid, ex.toUid].forEach(function (u) { if (u !== undefined) touched[u] = 1; });
+    });
+    buildings.forEach(function (b) {
+      if (!isBelt(b.item)) return;
+      var cx = Math.floor(b.x), cy = Math.floor(b.y);
+      var hasNb = false;
+      var nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (var i = 0; i < 4; i++) if (cell[(cx + nb[i][0]) + ',' + (cy + nb[i][1])] !== undefined) { hasNb = true; break; }
+      if (!hasNb && !touched[b.uid]) out.isolated.push(b.uid);
+    });
+
+    // 2) 爪子过长（>2 格速度掉一半以上）
+    buildings.forEach(function (b) {
+      if (!isSorter(b.item)) return;
+      var ex = b.extra || {};
+      var len = ex.len || (ex.link ? Math.max(1, Math.round(Math.hypot(ex.link.dx, ex.link.dy))) : 1);
+      if (len > 2) out.longSorter.push(b.uid);
+    });
+
+    // 3) 未供电
+    try {
+      var ps = powerStatus(buildings);
+      out.unpowered = ps.unpowered.slice();
+    } catch (e) { out.unpowered = []; }
+
+    // 4) 缺料（外部输入 / 未接通）
+    try {
+      var fl = flow(buildings);
+      Object.keys(fl.machines).forEach(function (uid) {
+        var m = fl.machines[uid];
+        if (!m.okAll) out.missing.push(+uid);
+      });
+    } catch (e) { out.missing = []; }
+
+    out.counts = {
+      isolated: out.isolated.length,
+      longSorter: out.longSorter.length,
+      unpowered: out.unpowered.length,
+      missing: out.missing.length
+    };
+    return out;
+  }
   global.DSPCALC = {
     itemsById: itemsById,
     recipesById: recipesById,
@@ -493,6 +552,7 @@
     powerStatus: powerStatus,
     sorterInfo: sorterInfo,
     flow: flow,
+    drc: drc,
     recipesFor: recipesFor
   };
 })(window);

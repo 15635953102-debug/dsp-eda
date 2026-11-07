@@ -4,7 +4,7 @@ import path from 'path';
 
 globalThis.window = globalThis;
 for (const f of ['js/data.js', 'js/md5.js', 'js/blueprint.js']) {
-  (0, eval)(fs.readFileSync('C:/Users/L/Desktop/Dysen/' + f, 'utf8'));
+  (0, eval)(fs.readFileSync('./' + f, 'utf8'));
 }
 const BP = globalThis.DSPBP;
 const D = window.DSP_DATA;

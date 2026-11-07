@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 globalThis.window = globalThis;
-const root = 'C:/Users/L/Desktop/Dysen';
+const root = path.resolve(import.meta.dirname, '..');
 for (const f of ['js/data.js', 'js/md5.js', 'js/blueprint.js']) {
   (0, eval)(fs.readFileSync(path.join(root, f), 'utf8'));
 }

@@ -61,7 +61,14 @@
     // 空间索引：格子 -> 建筑
     reindex: function () {
       this.spatial = new Map();
+      this.beltByCell = {};   // 走线拐弯用：格 -> 带子
       if (!this.doc) return;
+      for (var bi0 = 0; bi0 < this.doc.buildings.length; bi0++) {
+        var bb0 = this.doc.buildings[bi0];
+        if (bb0.item >= 2001 && bb0.item <= 2003) {
+          this.beltByCell[Math.floor(bb0.x) + ',' + Math.floor(bb0.y)] = bb0;
+        }
+      }
       for (var i = 0; i < this.doc.buildings.length; i++) {
         var b = this.doc.buildings[i];
         var fp = this.footprint(b);
@@ -364,11 +371,71 @@
       return r ? r.name : '';
     },
 
-    // 传送带吸附：横带吸到最近的横向格线（y 取整），竖带吸到最近的竖向格线（x 取整）
+    // 传送带吸附：统一落在格心（朝向由 yaw 决定）。横竖共用一套格子，拐弯才能严丝合缝
     beltSnap: function (wx, wy, yaw) {
-      var d = this.dirOf(yaw || 0);
-      if (d.x !== 0) return { x: Math.floor(wx) + 0.5, y: Math.round(wy) };
-      return { x: Math.round(wx), y: Math.floor(wy) + 0.5 };
+      return { x: Math.floor(wx) + 0.5, y: Math.floor(wy) + 0.5 };
+    },
+
+    // 走线用：格坐标 (c,r) → 带子坐标（格心）
+    beltPosOf: function (c, r, yaw) {
+      return { x: c + 0.5, y: r + 0.5 };
+    },
+
+    // 按曼哈顿路径铺带：先走 x 再走 y，拐点自动产生转弯
+    // 按曼哈顿路径铺带：格内转向（拐弯那格的方向 = 出去的方向），所以不会出现斜着相邻的缺口
+    _routeBelts: function (st, target) {
+      var self = this;
+      var cur = st.cur || st.from;
+      if (!cur) return;
+      var cells = [{ c: cur.c, r: cur.r }];
+      var c = cur.c, r = cur.r, guard = 0;
+      while ((c !== target.c || r !== target.r) && guard++ < 4000) {
+        if (c !== target.c) { c += (target.c > c ? 1 : -1); }
+        else { r += (target.r > r ? 1 : -1); }
+        cells.push({ c: c, r: r });
+      }
+      // 每格的朝向 = 去往下一格的方向；最后一格沿用上一段方向
+      var yaws = [];
+      for (var i = 0; i < cells.length; i++) {
+        var yaw;
+        if (i + 1 < cells.length) {
+          var dc = cells[i + 1].c - cells[i].c, dr = cells[i + 1].r - cells[i].r;
+          yaw = (dc !== 0) ? (dc > 0 ? 90 : 270) : (dr > 0 ? 0 : 180);
+        } else if (i > 0) {
+          var pc = cells[i].c - cells[i - 1].c, pr = cells[i].r - cells[i - 1].r;
+          yaw = (pc !== 0) ? (pc > 0 ? 90 : 270) : (pr > 0 ? 0 : 180);
+        } else {
+          yaw = this.pendingYaw;
+        }
+        yaws.push(yaw);
+      }
+      st.cells = st.cells || {};
+      for (var k = 0; k < cells.length; k++) {
+        var cell = cells[k];
+        var key = cell.c + ',' + cell.r;
+        var yawWant = yaws[k];
+        var exist = st.cells[key];
+        if (exist) {
+          if (exist.uid !== undefined && exist.yaw !== yawWant) {
+            for (var z = 0; z < self.doc.buildings.length; z++) {
+              if (self.doc.buildings[z].uid === exist.uid) {
+                self.doc.buildings[z].yaw = yawWant;
+                self.doc.buildings[z].yaw0 = yawWant;
+                break;
+              }
+            }
+            exist.yaw = yawWant;
+          }
+          continue;
+        }
+        var pos = this.beltPosOf(cell.c, cell.r, yawWant);
+        var rec = self.hooks.place && self.hooks.place(self.pendingItem, pos.x, pos.y, self.pendingZ, yawWant);
+        st.cells[key] = { uid: rec && rec.uid, yaw: yawWant };
+        st.placed = (st.placed || 0) + 1;
+      }
+      st.cur = { c: target.c, r: target.r };
+      st.lastYaw = yaws[yaws.length - 1];
+      this.pendingYaw = st.lastYaw;
     },
 
     // yaw → 单位方向（游戏里 0 朝 +y，90 朝 +x，180 朝 -y，270 朝 -x）
@@ -380,49 +447,74 @@
       return { x: -1, y: 0 };
     },
 
-    // 传送带：坐标就是“格线”坐标——横带压在某条横向格线上（y 是整数），竖带压在竖向格线上
+    // 传送带：带面走格子中线（入口 → 格心 → 出口），直带是一条线，拐弯自动变成圆角转弯
     drawBelt: function (ctx, b, def, sx, sy, s) {
-      var d = this.dirOf(b.yaw0 !== undefined && b.yaw0 !== null ? b.yaw0 : (b.yaw || 0));
-      var horizontal = d.x !== 0;
+      var yaw = b.yaw0 !== undefined && b.yaw0 !== null ? b.yaw0 : (b.yaw || 0);
+      var d = this.dirOf(yaw);
       var thick = Math.max(2, s * 0.5);
-      var x0, y0, w, h;
-      if (horizontal) {
-        x0 = Math.floor(b.x) * s + this.ox;                 // 沿格线占 1 格
-        y0 = b.y * s + this.oy - thick / 2;                 // 压在格线上
-        w = s; h = thick;
-      } else {
-        x0 = b.x * s + this.ox - thick / 2;                 // 压在格线上
-        y0 = Math.floor(b.y) * s + this.oy;
-        w = thick; h = s;
+      var cell = { c: Math.floor(b.x), r: Math.floor(b.y) };
+      var cx = (cell.c + 0.5) * s + this.ox;
+      var cy = (cell.r + 0.5) * s + this.oy;
+
+      // 有没有上一条从侧面接进来（拐弯）
+      var inDir = null;
+      var grid = this.beltByCell || {};
+      var nb4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (var i = 0; i < 4; i++) {
+        var n = nb4[i];
+        var nb = grid[(cell.c + n[0]) + ',' + (cell.r + n[1])];
+        if (!nb || nb === b) continue;
+        var nd = this.dirOf(nb.yaw0 !== undefined && nb.yaw0 !== null ? nb.yaw0 : (nb.yaw || 0));
+        if (nd.x === -n[0] && nd.y === -n[1]) { inDir = { x: n[0], y: n[1] }; break; }
       }
-      ctx.fillStyle = b.item === 2003 ? '#3f7f93' : (b.item === 2002 ? '#3a7183' : '#356374');
-      ctx.fillRect(x0, y0, w, h);
-      ctx.strokeStyle = 'rgba(185,228,240,0.35)';
-      ctx.lineWidth = 1;
+      var back = inDir ? { x: inDir.x, y: inDir.y } : { x: -d.x, y: -d.y };
+      var entry = { x: cx + back.x * s * 0.5, y: cy + back.y * s * 0.5 };
+      var exit = { x: cx + d.x * s * 0.5, y: cy + d.y * s * 0.5 };
+
+      var base = b.item === 2003 ? '#3f7f93' : (b.item === 2002 ? '#3a7183' : '#356374');
+      // 带面：深色描边 + 主色填充，圆角连接
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(10,18,26,0.85)';
+      ctx.lineWidth = thick + Math.max(2, s * 0.10);
       ctx.beginPath();
-      if (horizontal) {
-        ctx.moveTo(x0, y0 + 0.5); ctx.lineTo(x0 + w, y0 + 0.5);
-        ctx.moveTo(x0, y0 + h - 0.5); ctx.lineTo(x0 + w, y0 + h - 0.5);
-      } else {
-        ctx.moveTo(x0 + 0.5, y0); ctx.lineTo(x0 + 0.5, y0 + h);
-        ctx.moveTo(x0 + w - 0.5, y0); ctx.lineTo(x0 + w - 0.5, y0 + h);
-      }
+      ctx.moveTo(entry.x, entry.y);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(exit.x, exit.y);
       ctx.stroke();
+
+      ctx.strokeStyle = base;
+      ctx.lineWidth = thick;
+      ctx.beginPath();
+      ctx.moveTo(entry.x, entry.y);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(exit.x, exit.y);
+      ctx.stroke();
+
+      // 内侧导轨高光
+      ctx.strokeStyle = 'rgba(190,232,246,0.28)';
+      ctx.lineWidth = Math.max(1, s * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(entry.x, entry.y);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(exit.x, exit.y);
+      ctx.stroke();
+
       if (s < 9) return;
-      var cx = horizontal ? (Math.floor(b.x) + 0.5) * s + this.ox : b.x * s + this.ox;
-      var cy = horizontal ? b.y * s + this.oy : (Math.floor(b.y) + 0.5) * s + this.oy;
-      var L = s * 0.20;
+      // 行进箭头（靠近出口那一段的中点）
+      var ax = (cx + exit.x) / 2, ay = (cy + exit.y) / 2;
+      var L = s * 0.17;
       ctx.strokeStyle = 'rgba(232,248,255,0.85)';
       ctx.lineWidth = Math.max(1, s * 0.08);
       ctx.beginPath();
-      if (horizontal) {
-        ctx.moveTo(cx - d.x * L, cy - L);
-        ctx.lineTo(cx + d.x * L, cy);
-        ctx.lineTo(cx - d.x * L, cy + L);
+      if (d.x !== 0) {
+        ctx.moveTo(ax - d.x * L, ay - L);
+        ctx.lineTo(ax + d.x * L * 0.7, ay);
+        ctx.lineTo(ax - d.x * L, ay + L);
       } else {
-        ctx.moveTo(cx - L, cy - d.y * L);
-        ctx.lineTo(cx, cy + d.y * L);
-        ctx.lineTo(cx + L, cy - d.y * L);
+        ctx.moveTo(ax - L, ay - d.y * L);
+        ctx.lineTo(ax, ay + d.y * L * 0.7);
+        ctx.lineTo(ax + L, ay - d.y * L);
       }
       ctx.stroke();
     },
@@ -471,6 +563,47 @@
       ctx.fillStyle = '#0e1116';
       ctx.fillRect(ax - Math.max(1.5, s * 0.07), ay - Math.max(1.5, s * 0.07), Math.max(2.5, s * 0.14), Math.max(2.5, s * 0.14));
       ctx.globalAlpha = 1;
+    },
+
+    // 网络高亮：从一条带子出发，把整条相连的产线（带子 + 贴着它的建筑）都点亮
+    highlightNet: function (b) {
+      this.highlight.clear();
+      if (!b) return 0;
+      var isBelt = function (it) { return it >= 2001 && it <= 2003; };
+      if (!isBelt(b.item)) { this.highlight.add(b.uid); return 1; }
+      var grid = this.beltByCell || {};
+      var d = this.dirOf(b.yaw0 !== undefined && b.yaw0 !== null ? b.yaw0 : (b.yaw || 0));
+      var start = (d.x !== 0) ? (Math.floor(b.x) + ',' + Math.round(b.y)) : (Math.round(b.x) + ',' + Math.floor(b.y));
+      var seen = {}, stack = [start], n = 0;
+      var nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      while (stack.length) {
+        var key = stack.pop();
+        if (seen[key]) continue;
+        seen[key] = 1;
+        var cur = grid[key];
+        if (cur) { this.highlight.add(cur.uid); n++; }
+        var pp = key.split(',');
+        var cc = +pp[0], rr = +pp[1];
+        for (var i = 0; i < 4; i++) {
+          var k2 = (cc + nb[i][0]) + ',' + (rr + nb[i][1]);
+          if (!seen[k2] && grid[k2]) stack.push(k2);
+        }
+      }
+      var self = this;
+      this.doc.buildings.forEach(function (o) {
+        if (isBelt(o.item)) return;
+        var fp = self.footprint(o);
+        for (var x = Math.floor(fp.x); x < Math.ceil(fp.x + fp.w); x++) {
+          for (var y = Math.floor(fp.y); y < Math.ceil(fp.y + fp.h); y++) {
+            if (seen[x + ',' + y] || seen[(x + 1) + ',' + y] || seen[x + ',' + (y + 1)] ||
+                seen[(x - 1) + ',' + y] || seen[x + ',' + (y - 1)]) {
+              self.highlight.add(o.uid);
+              return;
+            }
+          }
+        }
+      });
+      return n;
     },
 
     // 建筑端口：数量来自数据（游戏 inserterBorder），沿边均匀分布、居中对齐
@@ -634,58 +767,12 @@
             self.hooks.hover && self.hooks.hover(b);
             self.requestRender();
           }
-          // 传送带连铺：方向按“相邻两段的实际铺放顺序”定（箭头永远跟手走），落点吸附到最近格线
+          // 传送带走线：按曼哈顿路径连铺，方向随路径改变（自然出现拐弯）
           if (self.tool === 'place' && self.pendingItem && (e.buttons & 1) && global.DSPBP.isBelt(self.pendingItem)) {
             var st = self._stroke;
             if (st) {
-              st.wx = wp.x; st.wy = wp.y;
-              // 先用起笔时锁定的方向（第一次明显移动决定横/竖），具体朝哪边按铺放顺序修正
-              var ddx0 = wp.x - st.w0x, ddy0 = wp.y - st.w0y;
-              if (!st.dir && (Math.abs(ddx0) > 0.35 || Math.abs(ddy0) > 0.35)) {
-                st.dir = Math.abs(ddx0) >= Math.abs(ddy0) ? 'h' : 'v';
-              }
-              var paintYaw = self.pendingYaw;
-              if (st.dir === 'h') paintYaw = 90;
-              else if (st.dir === 'v') paintYaw = 0;
-
-              var snp = self.beltSnap(wp.x, wp.y, paintYaw);
-
-              function fixYaw(uid, yaw) {
-                if (uid === undefined || uid === null) return;
-                for (var z = 0; z < self.doc.buildings.length; z++) {
-                  if (self.doc.buildings[z].uid === uid) {
-                    self.doc.buildings[z].yaw = yaw;
-                    self.doc.buildings[z].yaw0 = yaw;
-                    return;
-                  }
-                }
-              }
-
-              // 起笔那一格补上，线才连续
-              if (st.lastX === null) {
-                var snp0 = self.beltSnap(st.w0x, st.w0y, paintYaw);
-                if (snp0.x !== snp.x || snp0.y !== snp.y) {
-                  var b0 = self.hooks.place && self.hooks.place(self.pendingItem, snp0.x, snp0.y, self.pendingZ, paintYaw);
-                  st.prevX = snp0.x; st.prevY = snp0.y; st.prevUid = b0 && b0.uid;
-                  st.placed++;
-                }
-              }
-
-              if (st.lastX !== snp.x || st.lastY !== snp.y) {
-                // 真正决定朝向：上一段 → 这一段 的位移
-                if (st.prevX !== undefined && st.prevY !== undefined) {
-                  var dxs = snp.x - st.prevX, dys = snp.y - st.prevY;
-                  if (Math.abs(dxs) >= Math.abs(dys) && Math.abs(dxs) > 0.01) paintYaw = dxs > 0 ? 90 : 270;
-                  else if (Math.abs(dys) > 0.01) paintYaw = dys > 0 ? 0 : 180;
-                  fixYaw(st.prevUid, paintYaw);   // 同一笔内保持一致
-                }
-                st.lastX = snp.x; st.lastY = snp.y;
-                st.prevX = snp.x; st.prevY = snp.y;
-                self.pendingYaw = paintYaw;
-                var b1 = self.hooks.place && self.hooks.place(self.pendingItem, snp.x, snp.y, self.pendingZ, paintYaw);
-                st.prevUid = b1 && b1.uid;
-                st.placed++;
-              }
+              if (!st.from) st.from = { c: Math.floor(st.w0x), r: Math.floor(st.w0y) };
+              self._routeBelts(st, { c: Math.floor(wp.x), r: Math.floor(wp.y) });
             }
           }
           if (self.tool === 'place') self.requestRender();

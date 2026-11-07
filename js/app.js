@@ -201,8 +201,8 @@
       }
     }
 
-    // 传送带：若相邻格已有带子，沿用它朝向（这样连续点几下就能接成一条线）
-    if (item >= 2001 && item <= 2003) {
+    // 传送带：只有调用方没指定朝向时，才沿用相邻带子的朝向（走线会显式给朝向，不能被覆盖）
+    if (item >= 2001 && item <= 2003 && (yaw === undefined || yaw === null)) {
       for (var bi = 0; bi < state.doc.buildings.length; bi++) {
         var nb = state.doc.buildings[bi];
         if (nb.item < 2001 || nb.item > 2003) continue;
@@ -540,6 +540,7 @@
 
     if (sel.length === 0) {
       body.appendChild(layoutStatsNode());
+      try { body.appendChild(drcNode()); } catch (e2) { }
       body.appendChild(exportHintNode());
       return;
     }
@@ -1252,6 +1253,63 @@
     } catch (e) { return false; }
   }
 
+  // ---------- DRC：设计规则检查 ----------
+  function runDrc() {
+    var res = CALC.drc(state.doc.buildings);
+    invalidateFlow();
+    // 把问题建筑全部高亮出来
+    editor.highlight.clear();
+    [].concat(res.isolated, res.longSorter, res.unpowered, res.missing).forEach(function (uid) {
+      editor.highlight.add(uid);
+    });
+    editor.render();
+    renderInspector();
+
+    var c = res.counts;
+    var parts = [];
+    if (c.isolated) parts.push('断头带子 ' + c.isolated + ' 条');
+    if (c.longSorter) parts.push('爪子过长 ' + c.longSorter + ' 台');
+    if (c.unpowered) parts.push('未供电 ' + c.unpowered + ' 台');
+    if (c.missing) parts.push('缺料 ' + c.missing + ' 台');
+    state.lastDrc = res;
+    if (!parts.length) toast('检查通过：没有发现问题', 'ok');
+    else toast('检查发现：' + parts.join('，') + '（已高亮）', 'bad');
+    return res;
+  }
+
+  function drcNode() {
+    var res = state.lastDrc || CALC.drc(state.doc.buildings);
+    var sec = el('div', 'sec');
+    sec.appendChild(el('h3', '', '检查结果（DRC）'));
+    var rows = [
+      ['断头带子', res.counts.isolated, res.isolated, '没有接到任何带子/爪子的孤立带子'],
+      ['爪子过长', res.counts.longSorter, res.longSorter, '伸出超过 2 格，速度会掉一半以上'],
+      ['未供电', res.counts.unpowered, res.unpowered, '不在任何供电塔范围内'],
+      ['缺料', res.counts.missing, res.missing, '原料没接通或需外部输入']
+    ];
+    var any = false;
+    rows.forEach(function (r) {
+      if (!r[1]) return;
+      any = true;
+      var row = el('div', 'rowlink');
+      row.style.cssText = 'display:flex;justify-content:space-between;cursor:pointer;padding:3px 2px;border-bottom:1px solid rgba(255,255,255,.05)';
+      var l = el('span', '', r[0]);
+      l.style.color = '#ff9c8f';
+      var n = el('span', '', r[1] + ' 处');
+      row.appendChild(l); row.appendChild(n);
+      row.title = r[3];
+      row.onclick = function () {
+        editor.highlight.clear();
+        r[2].forEach(function (uid) { editor.highlight.add(uid); });
+        editor.render();
+        toast('高亮 ' + r[0] + ' ' + r[1] + ' 处', 'ok');
+      };
+      sec.appendChild(row);
+    });
+    if (!any) sec.appendChild(kv('状态', '通过，没有发现问题'));
+    sec.appendChild(el('div', 'note', '点任意一行会把对应问题高亮出来；改完再点右上角「检查 (X)」重跑。'));
+    return sec;
+  }
   // ---------- HUD ----------
   function refreshPower() {
     var st = CALC.powerStatus(state.doc.buildings);
@@ -1495,7 +1553,16 @@
 
     editor.on('place', function (item, x, y, z, yaw) { return placeBuilding(item, x, y, z, yaw); });
     editor.on('erase', function (list) { eraseBuildings(list); });
-    editor.on('select', function () { renderInspector(); });
+    editor.on('select', function (sel) {
+      var list = (sel && sel.length !== undefined) ? sel : editor.selectedObjects();
+      // EDA 手感：只选中一条传送带时，自动高亮整条相连的产线（网络）
+      if (list && list.length === 1 && list[0].item >= 2001 && list[0].item <= 2003) {
+        var n = editor.highlightNet(list[0]);
+        editor.render();
+        if (n > 1) toast('网络高亮：' + n + ' 段传送带（Esc 取消）', 'ok');
+      }
+      renderInspector();
+    });
     editor.on('cancel', function () {
       document.querySelectorAll('.pitem').forEach(function (n) { n.classList.remove('active'); });
       state.highlightItem = null;
@@ -1597,6 +1664,49 @@
 
     $('modalClose').onclick = closeModal;
     $('modal').addEventListener('click', function (e) { if (e.target === $('modal')) closeModal(); });
+
+    // 检查（DRC）
+    $('btnCheck').onclick = runDrc;
+
+    // EDA 风格快捷键：W 走线 / S 选择 / E 删除 / X 检查 / F 适应 / R 旋转（编辑器内处理）
+    window.addEventListener('keydown', function (e) {
+      var tag = (e.target && e.target.tagName) || '';
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var k = (e.key || '').toLowerCase();
+      if (k === 'w') { pickTool('belt'); e.preventDefault(); }
+      else if (k === 's') { pickTool('select'); e.preventDefault(); }
+      else if (k === 'e') { pickTool('erase'); e.preventDefault(); }
+      else if (k === 'x') { runDrc(); e.preventDefault(); }
+      else if (k === 'f') { var bb = bbox(state.doc.buildings, 3); editor.centerOn(bb.length ? bb : { x: -2, y: -2, w: 30, h: 30 }); }
+    });
+
+    function pickTool(kind) {
+      if (kind === 'select') {
+        editor.tool = 'select';
+        editor.pendingItem = null;
+        document.querySelectorAll('.pitem').forEach(function (n) { n.classList.remove('active'); });
+        $('hudInfo').textContent = '选择模式';
+        editor.render();
+        return;
+      }
+      if (kind === 'erase') {
+        editor.tool = 'erase';
+        editor.pendingItem = null;
+        $('hudInfo').textContent = '删除模式（点建筑即删）';
+        editor.render();
+        return;
+      }
+      if (kind === 'belt') {
+        // 直接切到极速传送带并进入放置模式
+        var target = null;
+        var items = document.querySelectorAll('.pitem');
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].textContent.indexOf('极速传送带') >= 0) { target = items[i]; break; }
+        }
+        if (target) target.click();
+      }
+    }
 
     initCalcUI();
     renderLayers();
